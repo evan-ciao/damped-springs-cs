@@ -24,7 +24,7 @@
 
 using System.Numerics;
 
-class DampedSpring
+internal class DampedSpring
 {
     public static void CalculateDampedString
     (
@@ -37,7 +37,7 @@ class DampedSpring
     )
     {
         const float epsilon = 0.0001f;
-
+        
         if (damping < 0)
             damping = 0;
         if (frequency < 0)
@@ -99,6 +99,109 @@ class DampedSpring
 
             position = oldPosition * (timeExpFreq + expTerm) + oldVelocity * (timeExp) + restPosition;
             velocity = oldPosition * (-frequency * timeExpFreq) + oldVelocity * (-timeExpFreq + expTerm);
+        }
+    }
+
+    public static void CalculateDampedString
+    (
+        ref Quaternion rotation,
+        ref Vector3 angularVelocity,
+        Quaternion restRotation,
+        float deltaTime,
+        float frequency,
+        float damping
+    )
+    {
+        const float epsilon = 0.0001f;
+        
+        if (damping < 0)
+            damping = 0;
+        if (frequency < 0)
+            frequency = 0;
+
+        if (frequency < epsilon)
+            return;
+
+        Quaternion oldRotation = Quaternion.Multiply(rotation, Quaternion.Inverse(restRotation));
+        Vector3 oldAngularVelocity = angularVelocity;
+        
+        // over-damped
+        if (damping > 1.0f + epsilon)
+        {
+            float za = -frequency * damping;
+            float zb = frequency * MathF.Sqrt(MathF.Pow(damping, 2) - 1.0f);
+            float z1 = za - zb;
+            float z2 = za + zb;
+
+            float e1 = MathF.Exp(z1 * deltaTime);
+            float e2 = MathF.Exp(z2 * deltaTime);
+
+            float invTwoZb = 1.0f / (2.0f*zb); // = 1 / (z2 - z1)
+                
+            float e1oTwoZb = e1*invTwoZb;
+            float e2oTwoZb = e2*invTwoZb;
+
+            float z1e1oTwoZb = z1*e1oTwoZb;
+            float z2e2oTwoZb = z2*e2oTwoZb;
+            
+            float angle = (oldAngularVelocity * (-e1oTwoZb + e2oTwoZb)).Length();
+            Vector3 rotationAxis = oldAngularVelocity;
+
+            rotation = Quaternion.Multiply(
+                       Quaternion.Multiply(
+                Quaternion.Slerp(Quaternion.Identity, oldRotation, e1oTwoZb * z2 - z2e2oTwoZb + e2),
+                Quaternion.CreateFromAxisAngle(rotationAxis, angle)),
+                restRotation
+                );
+ 
+            angularVelocity = new Vector3(oldRotation.X, oldRotation.Y, oldRotation.Z) * ((z1e1oTwoZb - z2e2oTwoZb + e2) * z2) + oldAngularVelocity * (-z1e1oTwoZb + z2e2oTwoZb);
+        }
+        // under-damped
+        else if (damping < 1.0f - epsilon)
+        {
+            float omegaZeta = frequency * damping;
+            float alpha     = frequency * MathF.Sqrt(1.0f - MathF.Pow(damping, 2));
+
+            float expTerm = MathF.Exp(-omegaZeta * deltaTime);
+            float cosTerm = MathF.Cos(alpha * deltaTime);
+            float sinTerm = MathF.Sin(alpha * deltaTime);
+                
+            float invAlpha = 1.0f / alpha;
+
+            float expSin = expTerm * sinTerm;
+            float expCos = expTerm * cosTerm;
+            float expOmegaZetaSinoAlpha = expTerm * omegaZeta * sinTerm * invAlpha;
+
+            float angle = (oldAngularVelocity * (expSin * invAlpha)).Length();
+            Vector3 rotationAxis = oldAngularVelocity;
+
+            rotation = Quaternion.Multiply(
+                       Quaternion.Multiply(
+                Quaternion.Slerp(Quaternion.Identity, oldRotation, expCos + expOmegaZetaSinoAlpha),
+                Quaternion.CreateFromAxisAngle(rotationAxis, angle)),
+                restRotation
+                );
+
+            angularVelocity = new Vector3(oldRotation.X, oldRotation.Y, oldRotation.Z) * (-expSin * alpha - omegaZeta * expOmegaZetaSinoAlpha) + oldAngularVelocity * (expCos - expOmegaZetaSinoAlpha);
+        }
+        // critically damped
+        else
+        {
+            float expTerm     = MathF.Exp(-frequency * deltaTime);
+            float timeExp     = deltaTime * expTerm;
+            float timeExpFreq = timeExp * frequency;
+
+            float angle = (oldAngularVelocity * (timeExp)).Length();
+            Vector3 rotationAxis = oldAngularVelocity;
+
+            rotation = Quaternion.Multiply(
+                       Quaternion.Multiply(
+                Quaternion.Slerp(Quaternion.Identity, oldRotation,timeExpFreq + expTerm),
+                Quaternion.CreateFromAxisAngle(rotationAxis, angle)),
+                restRotation
+                );
+
+            angularVelocity = new Vector3(oldRotation.X, oldRotation.Y, oldRotation.Z) * (-frequency * timeExpFreq) + oldAngularVelocity * (-timeExpFreq + expTerm);
         }
     }
 
